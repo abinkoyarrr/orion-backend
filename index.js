@@ -1,12 +1,13 @@
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
-const multer = require('multer');
-
-const upload = multer({ limits: { fileSize: 5 * 1024 * 1024 } }); // 5MB Limit
 
 const app = express();
-app.use(express.json());
+
+// Raw image body kabul etmek için limit artırımı
+app.use(express.raw({ type: 'image/*', limit: '10mb' }));
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 const server = http.createServer(app);
 const io = new Server(server, {
@@ -15,20 +16,31 @@ const io = new Server(server, {
 
 let activeStreams = {};
 
-// screenshot-basic kütüphanesinden gelen ekran görüntülerini yakalar
-app.post('/upload-frame', upload.single('files[]'), (req, res) => {
+// HTTP POST endpoint - Form veya raw upload kabul eder
+app.post('/upload-frame', (req, res) => {
   const playerId = req.query.playerId;
-  if (req.file && playerId) {
-    const base64Image = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
+  
+  // Gelen veriyi base64 formatına çevir
+  let base64Image = "";
+  
+  if (Buffer.isBuffer(req.body)) {
+    base64Image = `data:image/jpeg;base64,${req.body.toString('base64')}`;
+  } else if (req.body && req.body.data) {
+    base64Image = req.body.data;
+  }
+
+  if (playerId && base64Image) {
     activeStreams[playerId] = base64Image;
     
-    // Web panele canlı görüntüyü fırlat
+    // Web panele görüntüyü yayınla
     io.emit('render-frame', {
       playerId: playerId,
       frame: base64Image
     });
+    return res.status(200).send('OK');
   }
-  res.status(200).send('OK');
+
+  res.status(400).send('Bad Request');
 });
 
 io.on('connection', (socket) => {
