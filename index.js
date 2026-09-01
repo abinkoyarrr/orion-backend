@@ -1,6 +1,9 @@
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
+const multer = require('multer');
+
+const upload = multer({ limits: { fileSize: 5 * 1024 * 1024 } }); // 5MB Limit
 
 const app = express();
 app.use(express.json());
@@ -10,18 +13,25 @@ const io = new Server(server, {
   cors: { origin: "*", methods: ["GET", "POST"] }
 });
 
-// Canlı yayın karelerini ve verileri tutan geçici bellek
 let activeStreams = {};
 
-io.on('connection', (socket) => {
-  // FiveM NUI'den gelen canlı ekran görüntüsü (Frame)
-  socket.on('send-frame', (data) => {
-    // data: { playerId: 1, frame: 'data:image/jpeg;base64,...' }
-    activeStreams[data.playerId] = data.frame;
-    io.emit('render-frame', data);
-  });
+// screenshot-basic kütüphanesinden gelen ekran görüntülerini yakalar
+app.post('/upload-frame', upload.single('files[]'), (req, res) => {
+  const playerId = req.query.playerId;
+  if (req.file && playerId) {
+    const base64Image = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
+    activeStreams[playerId] = base64Image;
+    
+    // Web panele canlı görüntüyü fırlat
+    io.emit('render-frame', {
+      playerId: playerId,
+      frame: base64Image
+    });
+  }
+  res.status(200).send('OK');
+});
 
-  // Admin web paneline bağlandığında
+io.on('connection', (socket) => {
   socket.on('request-players', () => {
     socket.emit('player-list', Object.keys(activeStreams));
   });
